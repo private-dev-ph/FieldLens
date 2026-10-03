@@ -96,6 +96,49 @@ class InspectionAnswers extends Table {
   ];
 }
 
+@DataClassName('MediaRecord')
+@TableIndex(
+  name: 'inspection_media_draft_item_idx',
+  columns: {#inspectionId, #itemId},
+)
+class InspectionMedia extends Table {
+  TextColumn get id => text()();
+  TextColumn get inspectionId =>
+      text().references(InspectionDrafts, #id, onDelete: KeyAction.cascade)();
+  TextColumn get itemId => text()();
+  TextColumn get state => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get capturedAt => dateTime().nullable()();
+  TextColumn get originalPath => text()();
+  TextColumn get thumbnailPath => text()();
+  TextColumn get mimeType => text().nullable()();
+  IntColumn get byteLength => integer().nullable()();
+  IntColumn get thumbnailByteLength => integer().nullable()();
+  TextColumn get sha256 => text().nullable()();
+  TextColumn get thumbnailSha256 => text().nullable()();
+  IntColumn get width => integer().nullable()();
+  IntColumn get height => integer().nullable()();
+  TextColumn get errorCode => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (state IN ('capturing', 'ready', 'failed', 'missing'))",
+    'CHECK (byte_length IS NULL OR byte_length > 0)',
+    'CHECK (thumbnail_byte_length IS NULL OR thumbnail_byte_length > 0)',
+    'CHECK (width IS NULL OR width > 0)',
+    'CHECK (height IS NULL OR height > 0)',
+    "CHECK (error_code IS NULL OR error_code IN ('capture_cancelled', 'capture_failed', 'source_missing', 'integrity_mismatch'))",
+    "CHECK (state != 'ready' OR (captured_at IS NOT NULL "
+        'AND mime_type IS NOT NULL AND byte_length IS NOT NULL '
+        'AND thumbnail_byte_length IS NOT NULL AND sha256 IS NOT NULL '
+        'AND thumbnail_sha256 IS NOT NULL AND width IS NOT NULL '
+        'AND height IS NOT NULL AND error_code IS NULL))',
+  ];
+}
+
 @DriftDatabase(
   tables: [
     Sites,
@@ -105,13 +148,14 @@ class InspectionAnswers extends Table {
     InspectionTemplates,
     InspectionDrafts,
     InspectionAnswers,
+    InspectionMedia,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -129,6 +173,10 @@ class AppDatabase extends _$AppDatabase {
         await migrator.createTable(inspectionTemplates);
         await migrator.createTable(inspectionDrafts);
         await migrator.createTable(inspectionAnswers);
+      }
+      if (from < 3) {
+        await migrator.createTable(inspectionMedia);
+        await migrator.createIndex(inspectionMediaDraftItemIdx);
       }
     },
     beforeOpen: (_) async {

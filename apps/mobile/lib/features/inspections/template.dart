@@ -274,7 +274,7 @@ String? validateAnswer(
 /// Offline demo schema shared by Factory Demo work orders.
 InspectionTemplate factoryDemoTemplate() => InspectionTemplate(
   id: '10000000-0000-4000-8000-000000000003',
-  revision: 1,
+  revision: 2,
   title: 'Factory asset inspection',
   items: [
     TemplateItem(
@@ -300,6 +300,12 @@ InspectionTemplate factoryDemoTemplate() => InspectionTemplate(
       id: 'notes',
       label: 'Inspection notes',
       type: FieldType.text,
+      required: false,
+    ),
+    TemplateItem(
+      id: 'evidence_photo',
+      label: 'Inspection photos',
+      type: FieldType.photo,
       required: false,
     ),
   ],

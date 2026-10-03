@@ -29,7 +29,7 @@ jobs:
       - name: Check frozen database schema
         run: |
           dart run drift_dev schema dump lib/database/app_database.dart /tmp/fieldlens-schema
-          diff drift_schemas/drift_schema_v2.json /tmp/fieldlens-schema/drift_schema_v2.json
+          diff drift_schemas/drift_schema_v3.json /tmp/fieldlens-schema/drift_schema_v3.json
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test

@@ -2,7 +2,7 @@
 
 FieldLens is an offline-first industrial inspection platform under active development. Its goal is to let a technician identify an asset, complete an inspection, collect evidence, optionally run on-device AI, sign and submit while offline, then synchronize the complete record when connectivity returns.
 
-The local mobile foundation, demo assignments, validated inspection drafts, and asset-identification flow are implemented. Serial search and QR resolution use local data, with ambiguous matches shown for technician selection. See the [milestone checklist](docs/milestones.md) for current work and resume steps, and the [progress tracker](docs/progress.md) for verification. Demo assignments are not scoped through an authenticated account. Physical-camera acceptance has not run because no device is attached. Submission, media capture, remote sync transport, cloud backend, and AI are not implemented. See the [end-to-end project plan](docs/fieldlens_end_to_end_plan.md), [architecture overview](docs/architecture.md), and [architecture decisions](docs/adr/).
+The local mobile foundation, demo assignments, validated inspection drafts, and asset-identification flow are implemented. Serial search and QR resolution use local data, with ambiguous matches shown for technician selection. See the [milestone checklist](docs/milestones.md) for current work and resume steps, and the [progress tracker](docs/progress.md) for verification. Demo assignments are not scoped through an authenticated account. Physical-camera acceptance has not run because no device is attached. Photo evidence is stored privately on-device with durable recovery and checksum validation. Signatures, submission, remote sync transport, cloud backend, and AI remain unimplemented. See the [end-to-end project plan](docs/fieldlens_end_to_end_plan.md), [architecture overview](docs/architecture.md), and [architecture decisions](docs/adr/).
 
 ## Planned components
 
@@ -40,7 +40,7 @@ flutter test
 
 The local demo seeds two sites and five assets/work orders without authentication or account scoping. The work-order list observes local state; starting work writes the updated status and outbox operation atomically. A technician can begin and edit a durable inspection draft using a versioned template snapshot. Answers are validated and saved locally as they change.
 
-Formatting and analysis passed, all 59 Flutter tests passed, and `flutter build apk --debug` produced an Android debug APK with the barcode model bundled inside it. Migration, draft persistence, and asset identification received independent review. Physical-camera acceptance remains unrun. Hosted CI and physical-device end-to-end checks have not run. See the [progress tracker](docs/progress.md) for precise scope and limitations.
+Formatting and analysis passed, all 102 Flutter tests passed, and `flutter build apk --debug` produced an Android debug APK with the barcode model bundled inside it. Migrations, draft persistence, asset identification and durable photo capture received independent review. Physical-camera acceptance remains unrun. Hosted CI and physical-device end-to-end checks have not run. See the [progress tracker](docs/progress.md) for precise scope and limitations.
 
 The setup script installs verified Flutter/JDK/Android toolchains, configures the supplied environment CA and Gradle proxy without disabling TLS, and can be rerun. Run `source scripts/cloud-env.sh` in each new shell. Production release signing is unconfigured.
 
@@ -56,4 +56,4 @@ The setup script installs verified Flutter/JDK/Android toolchains, configures th
 
 ## Current status
 
-Local demo assignments and durable inspection drafts are verified. Asset serial search and QR identification are implemented against local data; physical-camera acceptance is unrun. Filesystem-backed evidence capture is the next milestone. Photo/signature controls remain placeholders. Submission, remote authentication/backend, synchronization transport, AI, and later roadmap phases remain unimplemented. The [progress tracker](docs/progress.md) records phase status and the next acceptance target.
+Local demo assignments and durable inspection drafts are verified. Asset serial search and QR identification are implemented against local data; physical-camera acceptance is unrun. Filesystem-backed photo capture, previews, unavailable-evidence handling and integrity review are implemented. Signature capture and final offline submission are the next milestone. Submission, remote authentication/backend, synchronization transport, AI, and later roadmap phases remain unimplemented. The [progress tracker](docs/progress.md) records phase status and the next acceptance target.

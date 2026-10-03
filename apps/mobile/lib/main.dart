@@ -5,6 +5,8 @@ import 'package:fieldlens_mobile/core/environment.dart';
 import 'package:fieldlens_mobile/core/providers.dart';
 import 'package:fieldlens_mobile/core/structured_log.dart';
 import 'package:fieldlens_mobile/database/app_database.dart';
+import 'package:fieldlens_mobile/features/camera/media_providers.dart';
+import 'package:fieldlens_mobile/features/camera/media_repository.dart';
 import 'package:fieldlens_mobile/features/work_orders/work_repository.dart';
 import 'package:fieldlens_mobile/features/inspections/inspection_repository.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +25,7 @@ class _BootstrapApp extends StatefulWidget {
 }
 
 class _BootstrapAppState extends State<_BootstrapApp> {
+  MediaRepository? _mediaRepository;
   AppDatabase? _database;
   Object? _error;
   bool _loading = true;
@@ -49,12 +52,14 @@ class _BootstrapAppState extends State<_BootstrapApp> {
         await repository.seedFactoryDemo();
         await InspectionRepository(database).seedFactoryTemplate();
       }
+      final mediaRepository = await openApplicationMediaRepository(database);
       if (!mounted) {
         await database.close();
         return;
       }
       setState(() {
         _database = database;
+        _mediaRepository = mediaRepository;
         _error = null;
         _loading = false;
       });
@@ -87,7 +92,10 @@ class _BootstrapAppState extends State<_BootstrapApp> {
     final database = _database;
     if (database != null) {
       return ProviderScope(
-        overrides: [appDatabaseProvider.overrideWithValue(database)],
+        overrides: [
+          appDatabaseProvider.overrideWithValue(database),
+          mediaRepositoryProvider.overrideWith((ref) => _mediaRepository!),
+        ],
         child: const FieldLensApp(),
       );
     }

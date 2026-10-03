@@ -1,9 +1,21 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 import 'package:fieldlens_mobile/core/providers.dart';
 import 'package:fieldlens_mobile/core/structured_log.dart';
+import 'package:fieldlens_mobile/database/app_database.dart' show MediaRecord;
+import 'package:fieldlens_mobile/features/camera/file_system_media_store.dart';
+import 'package:fieldlens_mobile/features/camera/media_providers.dart';
+import 'package:fieldlens_mobile/features/camera/media_repository.dart';
+import 'package:fieldlens_mobile/features/camera/photo_capture_screen.dart';
 import 'package:fieldlens_mobile/features/inspections/inspection_repository.dart';
 import 'package:fieldlens_mobile/features/inspections/template.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+typedef CapturePhotoCallback =
+    Future<CapturedPhoto?> Function(BuildContext context);
 
 final inspectionRepositoryProvider = Provider<InspectionRepository>((ref) {
   return InspectionRepository(ref.watch(appDatabaseProvider));
@@ -15,9 +27,10 @@ final inspectionDraftProvider =
     });
 
 class InspectionScreen extends ConsumerStatefulWidget {
-  const InspectionScreen({required this.draftId, super.key});
+  const InspectionScreen({required this.draftId, this.capturePhoto, super.key});
 
   final String draftId;
+  final CapturePhotoCallback? capturePhoto;
 
   @override
   ConsumerState<InspectionScreen> createState() => _InspectionScreenState();
@@ -35,6 +48,10 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
   final Map<String, String> _inputErrors = {};
   final Map<String, String> _reviewErrors = {};
   final Map<String, _SaveState> _saveStates = {};
+  final Set<String> _pendingPhotoItems = {};
+  final Set<String> _runtimeUnavailablePhotoIds = {};
+  final Map<String, _SaveState> _photoSaveStates = {};
+  final Map<String, String> _photoErrors = {};
   Map<String, Object?> _latestAnswers = const {};
 
   @override
@@ -51,8 +68,9 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
   @override
   Widget build(BuildContext context) {
     final draft = ref.watch(inspectionDraftProvider(widget.draftId));
+    final media = ref.watch(inspectionMediaProvider(widget.draftId));
     return PopScope<Object?>(
-      canPop: !_hasPendingSaves,
+      canPop: !_hasPendingSaves && !_hasPendingCaptures,
       child: Scaffold(
         appBar: AppBar(title: const Text('Inspection draft')),
         body: SafeArea(
@@ -79,17 +97,29 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
                   ),
                   const SizedBox(height: 16),
                   for (final item in view.template.items) ...[
-                    _itemCard(context, item, view.answers[item.id]),
+                    _itemCard(
+                      context,
+                      item,
+                      view.answers[item.id],
+                      mediaRecords: media.valueOrNull ?? const [],
+                      mediaReady: media.hasValue,
+                      mediaUnavailable: media.hasError,
+                    ),
                     const SizedBox(height: 12),
                   ],
                   const SizedBox(height: 8),
                   FilledButton.icon(
                     key: const ValueKey('review-inspection-draft'),
-                    onPressed: _hasPendingSaves
+                    onPressed:
+                        _hasPendingSaves ||
+                            _hasPendingCaptures ||
+                            _reviewInProgress
                         ? null
                         : () => _review(view.template, view.answers),
                     icon: const Icon(Icons.fact_check_outlined),
-                    label: const Text('Review draft'),
+                    label: Text(
+                      _reviewInProgress ? 'Checking evidence…' : 'Review draft',
+                    ),
                   ),
                   if (_reviewErrors.isNotEmpty) ...[
                     const SizedBox(height: 12),
@@ -100,7 +130,14 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
                         color: Theme.of(context).colorScheme.error,
                       ),
                     ),
-                  ] else if (_hasPendingSaves && _reviewWasCompleted) ...[
+                  ] else if (_reviewInProgress) ...[
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Checking that photo evidence is available on this device.',
+                      key: ValueKey('draft-review-checking'),
+                    ),
+                  ] else if ((_hasPendingSaves || _hasPendingCaptures) &&
+                      _reviewWasCompleted) ...[
                     const SizedBox(height: 12),
                     const Text(
                       'Saving answers before the draft can be reviewed.',
@@ -131,10 +168,19 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
   }
 
   bool _reviewWasCompleted = false;
+  bool _reviewInProgress = false;
   bool get _hasPendingSaves =>
       _saveStates.values.any((state) => state == _SaveState.saving);
+  bool get _hasPendingCaptures => _pendingPhotoItems.isNotEmpty;
 
-  Widget _itemCard(BuildContext context, TemplateItem item, Object? answer) {
+  Widget _itemCard(
+    BuildContext context,
+    TemplateItem item,
+    Object? answer, {
+    required List<MediaRecord> mediaRecords,
+    required bool mediaReady,
+    required bool mediaUnavailable,
+  }) {
     _synchronizeController(item.id, answer);
     final validationMessage = _inputErrors[item.id] ?? _reviewErrors[item.id];
     return Card(
@@ -161,7 +207,14 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            _fieldControl(context, item, answer),
+            _fieldControl(
+              context,
+              item,
+              answer,
+              mediaRecords: mediaRecords,
+              mediaReady: mediaReady,
+              mediaUnavailable: mediaUnavailable,
+            ),
             if (validationMessage != null) ...[
               const SizedBox(height: 4),
               Text(
@@ -183,8 +236,11 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
   Widget _fieldControl(
     BuildContext context,
     TemplateItem item,
-    Object? answer,
-  ) {
+    Object? answer, {
+    required List<MediaRecord> mediaRecords,
+    required bool mediaReady,
+    required bool mediaUnavailable,
+  }) {
     final currentAnswer = _answerFor(item.id, answer);
     switch (item.type) {
       case FieldType.boolean:
@@ -197,8 +253,12 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
             ButtonSegment(value: false, label: Text('No')),
           ],
           selected: value == null ? const {} : {value},
-          onSelectionChanged: (selection) =>
-              _saveField(item, selection.isEmpty ? null : selection.first),
+          onSelectionChanged: _reviewInProgress
+              ? null
+              : (selection) => _saveField(
+                  item,
+                  selection.isEmpty ? null : selection.first,
+                ),
         );
       case FieldType.passFailNa:
         final value = currentAnswer is String ? currentAnswer : null;
@@ -211,8 +271,12 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
             ButtonSegment(value: 'na', label: Text('N/A')),
           ],
           selected: value == null ? const {} : {value},
-          onSelectionChanged: (selection) =>
-              _saveField(item, selection.isEmpty ? null : selection.first),
+          onSelectionChanged: _reviewInProgress
+              ? null
+              : (selection) => _saveField(
+                  item,
+                  selection.isEmpty ? null : selection.first,
+                ),
         );
       case FieldType.singleChoice:
         final value =
@@ -230,7 +294,9 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
                 child: Text(_choiceLabel(option)),
               ),
           ],
-          onChanged: (choice) => _saveField(item, choice),
+          onChanged: _reviewInProgress
+              ? null
+              : (choice) => _saveField(item, choice),
         );
       case FieldType.multipleChoice:
         final selected = _stringValues(currentAnswer).toSet();
@@ -242,21 +308,24 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
                 contentPadding: EdgeInsets.zero,
                 title: Text(_choiceLabel(option)),
                 value: selected.contains(option),
-                onChanged: (checked) {
-                  final next = {...selected};
-                  if (checked ?? false) {
-                    next.add(option);
-                  } else {
-                    next.remove(option);
-                  }
-                  _saveField(item, next.toList()..sort());
-                },
+                onChanged: _reviewInProgress
+                    ? null
+                    : (checked) {
+                        final next = {...selected};
+                        if (checked ?? false) {
+                          next.add(option);
+                        } else {
+                          next.remove(option);
+                        }
+                        _saveField(item, next.toList()..sort());
+                      },
               ),
           ],
         );
       case FieldType.numeric:
         return TextField(
           key: ValueKey('field-${item.id}'),
+          enabled: !_reviewInProgress,
           controller: _controllerFor(item, answer),
           focusNode: _focusNodeFor(item.id),
           keyboardType: const TextInputType.numberWithOptions(
@@ -290,6 +359,7 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
       case FieldType.text:
         return TextField(
           key: ValueKey('field-${item.id}'),
+          enabled: !_reviewInProgress,
           controller: _controllerFor(item, answer),
           focusNode: _focusNodeFor(item.id),
           minLines: 2,
@@ -303,6 +373,7 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
       case FieldType.qrSerial:
         return TextField(
           key: ValueKey('field-${item.id}'),
+          enabled: !_reviewInProgress,
           controller: _controllerFor(item, answer),
           focusNode: _focusNodeFor(item.id),
           decoration: const InputDecoration(
@@ -313,12 +384,13 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
           onChanged: (value) => _saveText(item, value),
         );
       case FieldType.photo:
-        final count = _stringValues(answer).length;
-        return _EvidencePlaceholder(
-          icon: Icons.photo_camera_outlined,
-          message: count == 0
-              ? 'Photo capture will be available in the evidence step.'
-              : '$count photo ${count == 1 ? 'attachment' : 'attachments'} recorded',
+        return _photoField(
+          context,
+          item,
+          answer,
+          mediaRecords: mediaRecords,
+          mediaReady: mediaReady,
+          mediaUnavailable: mediaUnavailable,
         );
       case FieldType.signature:
         final hasSignature = answer is String && answer.isNotEmpty;
@@ -330,6 +402,325 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
         );
     }
   }
+
+  Widget _photoField(
+    BuildContext context,
+    TemplateItem item,
+    Object? answer, {
+    required List<MediaRecord> mediaRecords,
+    required bool mediaReady,
+    required bool mediaUnavailable,
+  }) {
+    final mediaRepository = ref.read(mediaRepositoryProvider).valueOrNull;
+    final references = _stringValues(answer);
+    final fieldRecords = mediaRecords
+        .where((record) => record.itemId == item.id)
+        .where(
+          (record) =>
+              record.state != 'failed' ||
+              record.errorCode != 'capture_cancelled',
+        )
+        .toList(growable: false);
+    final recordById = {for (final record in fieldRecords) record.id: record};
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (references.isNotEmpty) ...[
+          for (final id in references)
+            _photoEvidenceCard(
+              context,
+              item: item,
+              mediaId: id,
+              record: recordById[id],
+              mediaRepository: mediaRepository,
+            ),
+        ],
+        for (final record in fieldRecords.where(
+          (record) => !references.contains(record.id),
+        ))
+          if (record.state == 'ready' && mediaRepository != null)
+            _photoEvidenceCard(
+              context,
+              item: item,
+              mediaId: record.id,
+              record: record,
+              mediaRepository: mediaRepository,
+            )
+          else if (record.state == 'capturing')
+            const _EvidenceStateMessage(
+              message: 'Photo capture is being recovered on this device.',
+            )
+          else
+            const _EvidenceStateMessage(
+              message: 'Photo evidence is unavailable on this device.',
+            ),
+        if (mediaUnavailable)
+          const _EvidenceStateMessage(
+            message: 'Local photo storage is unavailable. Retry to continue.',
+          )
+        else if (!mediaReady)
+          const _EvidenceStateMessage(
+            message: 'Preparing local photo storage…',
+          ),
+        if (_photoErrors[item.id] case final error?) ...[
+          const SizedBox(height: 8),
+          Text(
+            error,
+            key: ValueKey('photo-error-${item.id}'),
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        if (_photoSaveStates[item.id] == _SaveState.saving) ...[
+          const SizedBox(height: 8),
+          const Text('Saving photo locally…', key: ValueKey('photo-saving')),
+        ] else if (_photoSaveStates[item.id] == _SaveState.saved) ...[
+          const SizedBox(height: 8),
+          const Text('Saved locally', key: ValueKey('photo-saved')),
+        ],
+        if (mediaUnavailable)
+          OutlinedButton.icon(
+            key: ValueKey('retry-photo-storage-${item.id}'),
+            onPressed: () {
+              ref.invalidate(mediaRepositoryProvider);
+              ref.invalidate(inspectionMediaProvider(widget.draftId));
+            },
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry local storage'),
+          )
+        else
+          OutlinedButton.icon(
+            key: ValueKey('capture-photo-${item.id}'),
+            onPressed:
+                mediaReady &&
+                    !_pendingPhotoItems.contains(item.id) &&
+                    !_hasPendingSaves &&
+                    !_reviewInProgress
+                ? () => _capturePhoto(item)
+                : null,
+            icon: const Icon(Icons.add_a_photo_outlined),
+            label: Text(
+              _pendingPhotoItems.contains(item.id)
+                  ? 'Saving photo…'
+                  : 'Capture photo',
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _photoEvidenceCard(
+    BuildContext context, {
+    required TemplateItem item,
+    required String mediaId,
+    required MediaRecord? record,
+    required MediaRepository? mediaRepository,
+  }) {
+    if (record == null ||
+        record.state != 'ready' ||
+        mediaRepository == null ||
+        _runtimeUnavailablePhotoIds.contains(mediaId)) {
+      return _unavailablePhotoMessage(item, mediaId);
+    }
+    final thumbnail = mediaRepository.files.thumbnailFile(record.id);
+    final original = mediaRepository.files.originalFile(record.id);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        key: ValueKey('photo-thumbnail-${record.id}'),
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            child: Stack(
+              children: [
+                InteractiveViewer(
+                  child: Image.file(
+                    original,
+                    errorBuilder: (_, _, _) {
+                      WidgetsBinding.instance.addPostFrameCallback(
+                        (_) => _markPhotoUnavailable(mediaId),
+                      );
+                      return _unavailablePhotoMessage(item, mediaId);
+                    },
+                  ),
+                ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            thumbnail,
+            width: 112,
+            height: 112,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => _markPhotoUnavailable(mediaId),
+              );
+              return _unavailablePhotoMessage(item, mediaId);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _unavailablePhotoMessage(TemplateItem item, String mediaId) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _EvidenceStateMessage(
+          message: 'Photo evidence is unavailable on this device.',
+        ),
+        TextButton.icon(
+          key: ValueKey('remove-unavailable-photo-${item.id}-$mediaId'),
+          onPressed:
+              _reviewInProgress || _hasPendingSaves || _hasPendingCaptures
+              ? null
+              : () => _removePhotoReference(item, mediaId),
+          icon: const Icon(Icons.remove_circle_outline),
+          label: const Text('Remove unavailable photo reference'),
+        ),
+      ],
+    ),
+  );
+
+  void _markPhotoUnavailable(String mediaId) {
+    if (!mounted || !_runtimeUnavailablePhotoIds.add(mediaId)) return;
+    setState(() {});
+  }
+
+  void _removePhotoReference(TemplateItem item, String mediaId) {
+    if (_hasPendingSaves || _hasPendingCaptures || _reviewInProgress) return;
+    final answer = _stringValues(
+      _answerFor(item.id, _latestAnswers[item.id]),
+    ).where((id) => id != mediaId).toList(growable: false);
+    _saveField(item, answer);
+    _runtimeUnavailablePhotoIds.remove(mediaId);
+  }
+
+  Future<void> _capturePhoto(TemplateItem item) async {
+    if (!mounted ||
+        _pendingPhotoItems.contains(item.id) ||
+        _hasPendingSaves ||
+        _reviewInProgress) {
+      return;
+    }
+    setState(() {
+      _pendingPhotoItems.add(item.id);
+      _photoErrors.remove(item.id);
+      _photoSaveStates[item.id] = _SaveState.saving;
+      _reviewWasCompleted = false;
+    });
+
+    MediaRepository? repository;
+    String? mediaId;
+    var cameraReturned = false;
+    try {
+      final activeRepository = await ref.read(mediaRepositoryProvider.future);
+      repository = activeRepository;
+      if (!mounted) return;
+      final activeMediaId = await activeRepository.beginCapture(
+        widget.draftId,
+        item.id,
+      );
+      mediaId = activeMediaId;
+      if (!mounted) {
+        await activeRepository.cancelCapture(activeMediaId);
+        return;
+      }
+      final capture = await (widget.capturePhoto ?? _captureWithCamera)(
+        context,
+      );
+      cameraReturned = true;
+      if (capture == null) {
+        await activeRepository.cancelCapture(activeMediaId);
+        if (mounted) {
+          setState(() {
+            _photoSaveStates.remove(item.id);
+            _photoErrors.remove(item.id);
+          });
+        }
+        return;
+      }
+
+      final byteLength = await capture.file.length();
+      if (byteLength > FileSystemMediaStore.maxPhotoBytes) {
+        await activeRepository.cancelCapture(activeMediaId);
+        throw const _PhotoTooLarge();
+      }
+      final bytes = Uint8List.fromList(await capture.file.readAsBytes());
+      await activeRepository.completeCapture(
+        activeMediaId,
+        bytes,
+        capturedAt: capture.capturedAt,
+      );
+      if (mounted) {
+        setState(() {
+          final previous = _stringValues(_latestAnswers[item.id]);
+          _expectedAnswers[item.id] = previous.contains(activeMediaId)
+              ? previous
+              : [...previous, activeMediaId];
+          _hasExpectedAnswer.add(item.id);
+          _photoSaveStates[item.id] = _SaveState.saved;
+          _photoErrors.remove(item.id);
+        });
+      }
+    } catch (error, stackTrace) {
+      final cancelRepository = repository;
+      final cancelMediaId = mediaId;
+      if (!cameraReturned &&
+          cancelRepository != null &&
+          cancelMediaId != null) {
+        try {
+          await cancelRepository.cancelCapture(cancelMediaId);
+        } catch (cancelError, cancelStackTrace) {
+          StructuredLog.error(
+            'inspection_photo_cancel_failed',
+            error: cancelError,
+            stackTrace: cancelStackTrace,
+            fields: {'draftId': widget.draftId, 'itemId': item.id},
+          );
+        }
+      }
+      StructuredLog.error(
+        'inspection_photo_capture_failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: {'draftId': widget.draftId, 'itemId': item.id},
+      );
+      if (mounted) {
+        setState(() {
+          _photoSaveStates.remove(item.id);
+          _photoErrors[item.id] = error is _PhotoTooLarge
+              ? 'This photo exceeds the 24 MiB limit. Capture a smaller photo.'
+              : 'The photo could not be saved locally. You can capture another photo.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _pendingPhotoItems.remove(item.id));
+      }
+    }
+  }
+
+  Future<CapturedPhoto?> _captureWithCamera(BuildContext context) =>
+      Navigator.of(context).push<CapturedPhoto>(
+        MaterialPageRoute<CapturedPhoto>(
+          builder: (_) => const PhotoCaptureScreen(),
+        ),
+      );
 
   TextEditingController _controllerFor(TemplateItem item, Object? answer) {
     return _controllers.putIfAbsent(
@@ -378,6 +769,7 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
       : persistedAnswer;
 
   void _saveText(TemplateItem item, String value) {
+    if (_reviewInProgress) return;
     final error = validateAnswer(item, value, enforceRequired: false);
     if (error != null) {
       setState(() => _inputErrors[item.id] = error);
@@ -392,6 +784,7 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
   }
 
   void _saveField(TemplateItem item, Object? value) {
+    if (_reviewInProgress) return;
     final error = validateAnswer(item, value, enforceRequired: false);
     if (error != null) {
       setState(() => _inputErrors[item.id] = error);
@@ -444,21 +837,120 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
     );
   }
 
-  void _review(InspectionTemplate template, Map<String, Object?> answers) {
+  Future<void> _review(
+    InspectionTemplate template,
+    Map<String, Object?> answers,
+  ) async {
+    if (_hasPendingSaves || _hasPendingCaptures || _reviewInProgress) return;
+    setState(() => _reviewInProgress = true);
+
+    final effectiveAnswers = {...answers, ..._expectedAnswers};
+    final errors = <String, String>{}
+      ..addAll(template.validateAnswers(effectiveAnswers))
+      ..addAll(_inputErrors)
+      ..addEntries(
+        _failedSaveFields.map(
+          (itemId) =>
+              MapEntry(itemId, 'This answer could not be saved. Retry it.'),
+        ),
+      );
+    final unavailablePhotoIds = <String>{};
+    final verifiedPhotoIds = <String>{};
+
+    final photoItems = template.items.where(
+      (item) => item.type == FieldType.photo,
+    );
+    final hasPhotoReferences = photoItems.any(
+      (item) => _stringValues(effectiveAnswers[item.id]).isNotEmpty,
+    );
+    if (hasPhotoReferences) {
+      try {
+        final repository = ref.read(mediaRepositoryProvider).valueOrNull;
+        final records = ref
+            .read(inspectionMediaProvider(widget.draftId))
+            .valueOrNull;
+        for (final item in photoItems) {
+          final ids = _stringValues(effectiveAnswers[item.id]);
+          if (ids.isEmpty) continue;
+          var unavailable = repository == null || records == null;
+          if (repository == null || records == null) {
+            unavailablePhotoIds.addAll(ids);
+          }
+          for (final id in ids) {
+            MediaRecord? record;
+            for (final candidate in records ?? const <MediaRecord>[]) {
+              if (candidate.id == id) {
+                record = candidate;
+                break;
+              }
+            }
+            if (record == null ||
+                repository == null ||
+                record.inspectionId != widget.draftId ||
+                record.itemId != item.id ||
+                record.state != 'ready' ||
+                record.mimeType != 'image/jpeg' ||
+                record.byteLength == null ||
+                record.thumbnailByteLength == null ||
+                record.sha256 == null ||
+                record.thumbnailSha256 == null ||
+                record.width == null ||
+                record.height == null) {
+              unavailable = true;
+              unavailablePhotoIds.add(id);
+              continue;
+            }
+            try {
+              final original = repository.files.originalFile(id);
+              final thumbnail = repository.files.thumbnailFile(id);
+              if (!await original.exists() ||
+                  !await thumbnail.exists() ||
+                  await original.length() != record.byteLength ||
+                  await thumbnail.length() != record.thumbnailByteLength ||
+                  record.byteLength! > FileSystemMediaStore.maxPhotoBytes ||
+                  await _hashFile(original) != record.sha256 ||
+                  await _hashFile(thumbnail) != record.thumbnailSha256) {
+                unavailable = true;
+                unavailablePhotoIds.add(id);
+              } else {
+                verifiedPhotoIds.add(id);
+              }
+            } on Object {
+              unavailable = true;
+              unavailablePhotoIds.add(id);
+            }
+          }
+          if (unavailable) {
+            errors[item.id] =
+                'Photo evidence is unavailable on this device. Capture it again before reviewing.';
+          }
+        }
+      } on Object {
+        for (final item in photoItems) {
+          final ids = _stringValues(effectiveAnswers[item.id]);
+          if (ids.isNotEmpty) {
+            unavailablePhotoIds.addAll(ids);
+            errors[item.id] =
+                'Photo evidence is unavailable on this device. Capture it again before reviewing.';
+          }
+        }
+      }
+    }
+
+    if (!mounted) return;
     setState(() {
       _reviewWasCompleted = true;
+      _reviewInProgress = false;
+      _runtimeUnavailablePhotoIds.removeAll(verifiedPhotoIds);
+      _runtimeUnavailablePhotoIds.addAll(unavailablePhotoIds);
       _reviewErrors
         ..clear()
-        ..addAll(template.validateAnswers({...answers, ..._expectedAnswers}))
-        ..addAll(_inputErrors)
-        ..addEntries(
-          _failedSaveFields.map(
-            (itemId) =>
-                MapEntry(itemId, 'This answer could not be saved. Retry it.'),
-          ),
-        );
+        ..addAll(errors);
     });
   }
+
+  Future<String> _hashFile(File file) async =>
+      (await sha256.bind(file.openRead()).first).toString();
 
   Widget _saveStatus(
     BuildContext context,
@@ -504,6 +996,22 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
 }
 
 enum _SaveState { saving, saved, error }
+
+class _PhotoTooLarge implements Exception {
+  const _PhotoTooLarge();
+}
+
+class _EvidenceStateMessage extends StatelessWidget {
+  const _EvidenceStateMessage({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Text(message, style: Theme.of(context).textTheme.bodySmall),
+  );
+}
 
 class _EvidencePlaceholder extends StatelessWidget {
   const _EvidencePlaceholder({required this.icon, required this.message});

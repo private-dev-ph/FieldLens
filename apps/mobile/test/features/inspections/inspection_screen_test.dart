@@ -1,8 +1,12 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:fieldlens_mobile/features/camera/file_system_media_store.dart';
+import 'package:fieldlens_mobile/features/camera/media_providers.dart';
+import 'package:fieldlens_mobile/features/camera/media_repository.dart';
 import 'package:fieldlens_mobile/core/providers.dart';
 import 'package:fieldlens_mobile/database/app_database.dart'
     hide InspectionTemplate;
@@ -13,6 +17,8 @@ import 'package:fieldlens_mobile/features/work_orders/work_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
+import 'package:path/path.dart' as path;
 
 void main() {
   testWidgets(
@@ -24,11 +30,11 @@ void main() {
       await tester.pumpWidget(_createApp(fixture));
       await tester.pumpAndSettle();
       await tester.tap(find.text('No'));
-      await tester.runAsync(() async {
-        await fixture.repository
-            .watchDraft(fixture.draftId)
-            .firstWhere((draft) => draft.answers['safety_check'] == false);
-      });
+      await _waitForDraft(
+        tester,
+        fixture,
+        (draft) => draft.answers['safety_check'] == false,
+      );
       await tester.pumpAndSettle();
       expect(find.text('Saved locally'), findsOneWidget);
 
@@ -45,6 +51,8 @@ void main() {
         find.text('Review 1 answer before this draft is complete.'),
         findsOneWidget,
       );
+      await tester.drag(find.byType(ListView).first, const Offset(0, 1000));
+      await tester.pumpAndSettle();
       await _scrollTo(
         tester,
         find.byKey(const ValueKey('inspection-error-corrosion')),
@@ -84,6 +92,11 @@ void main() {
         true,
       ),
     );
+    await _waitForDraft(
+      tester,
+      fixture,
+      (draft) => draft.answers['required_boolean'] == true,
+    );
 
     await tester.pumpWidget(_createApp(fixture));
     await tester.pumpAndSettle();
@@ -100,12 +113,11 @@ void main() {
       find.byKey(const ValueKey('field-required_boolean')),
     );
     await tester.tap(find.text('Yes'));
-    await tester.runAsync(() async {
-      await fixture.repository
-          .watchDraft(fixture.draftId)
-          .firstWhere((draft) => draft.answers['required_boolean'] == null)
-          .timeout(const Duration(seconds: 5));
-    });
+    await _waitForDraft(
+      tester,
+      fixture,
+      (draft) => draft.answers['required_boolean'] == null,
+    );
     await tester.pumpAndSettle();
 
     expect(validReview, findsNothing);
@@ -129,13 +141,11 @@ void main() {
     await tester.pumpAndSettle();
     await _scrollTo(tester, notesField);
     await tester.enterText(notesField, 'Valve casing inspected');
-    await tester.runAsync(() async {
-      await fixture.repository
-          .watchDraft(fixture.draftId)
-          .firstWhere(
-            (draft) => draft.answers['notes'] == 'Valve casing inspected',
-          );
-    });
+    await _waitForDraft(
+      tester,
+      fixture,
+      (draft) => draft.answers['notes'] == 'Valve casing inspected',
+    );
     await tester.pumpAndSettle();
 
     await _scrollTo(tester, notesField);
@@ -147,11 +157,11 @@ void main() {
     await tester.pumpAndSettle();
     await _scrollTo(tester, find.text('No'));
     await tester.tap(find.text('No'));
-    await tester.runAsync(() async {
-      await fixture.repository
-          .watchDraft(fixture.draftId)
-          .firstWhere((draft) => draft.answers['safety_check'] == false);
-    });
+    await _waitForDraft(
+      tester,
+      fixture,
+      (draft) => draft.answers['safety_check'] == false,
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -187,23 +197,13 @@ void main() {
     await tester.pump();
     expect(tester.widget<CheckboxListTile>(firstOption).value, isTrue);
     expect(tester.widget<CheckboxListTile>(secondOption).value, isTrue);
-    InspectionDraftView? saved;
-    for (var attempt = 0; attempt < 20; attempt++) {
-      await tester.pump(const Duration(milliseconds: 20));
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      saved = await tester.runAsync(
-        () => fixture.repository.watchDraft(fixture.draftId).first,
-      );
-      final answer = saved!.answers['multiple_choice'];
-      if (answer is List &&
+    final saved = await _waitForDraft(tester, fixture, (draft) {
+      final answer = draft.answers['multiple_choice'];
+      return answer is List &&
           answer.contains('first') &&
-          answer.contains('second')) {
-        break;
-      }
-    }
-    expect(saved!.answers['multiple_choice'], ['first', 'second']);
+          answer.contains('second');
+    });
+    expect(saved.answers['multiple_choice'], ['first', 'second']);
     await tester.pumpAndSettle();
 
     expect(tester.widget<CheckboxListTile>(firstOption).value, isTrue);
@@ -240,6 +240,7 @@ void main() {
       overrides: [
         appDatabaseProvider.overrideWithValue(fixture.database),
         inspectionRepositoryProvider.overrideWithValue(retryingRepository),
+        mediaRepositoryProvider.overrideWith((ref) async => fixture.media),
       ],
     );
     _registerCleanup(tester, fixture, additionalContainers: [container]);
@@ -265,11 +266,11 @@ void main() {
     );
 
     await tester.tap(find.text('Retry save'));
-    await tester.runAsync(() async {
-      await fixture.repository
-          .watchDraft(fixture.draftId)
-          .firstWhere((draft) => draft.answers['notes'] == 'Retry this save');
-    });
+    await _waitForDraft(
+      tester,
+      fixture,
+      (draft) => draft.answers['notes'] == 'Retry this save',
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Saved locally'), findsOneWidget);
@@ -293,11 +294,9 @@ void main() {
         await _scrollTo(tester, field);
         expect(field, findsOneWidget);
       }
-      final photoPlaceholder = find.text(
-        'Photo capture will be available in the evidence step.',
-      );
-      await _scrollTo(tester, photoPlaceholder);
-      expect(photoPlaceholder, findsOneWidget);
+      final photoCapture = find.byKey(const ValueKey('capture-photo-photo'));
+      await _scrollTo(tester, photoCapture);
+      expect(photoCapture, findsOneWidget);
       final signaturePlaceholder = find.text(
         'Signature capture will be available in the evidence step.',
       );
@@ -337,14 +336,64 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+Future<InspectionDraftView> _waitForDraft(
+  WidgetTester tester,
+  _Fixture fixture,
+  bool Function(InspectionDraftView) matches,
+) async {
+  final completer = Completer<InspectionDraftView>();
+  StreamSubscription<InspectionDraftView>? subscription;
+  await tester.runAsync(() async {
+    subscription = fixture.repository.watchDraft(fixture.draftId).listen((
+      draft,
+    ) {
+      if (!completer.isCompleted && matches(draft)) {
+        completer.complete(draft);
+      }
+    }, onError: completer.completeError);
+  });
+
+  try {
+    for (var attempt = 0; attempt < 100; attempt++) {
+      if (completer.isCompleted) return await completer.future;
+      await tester.pump(const Duration(milliseconds: 10));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    throw TimeoutException(
+      'The inspection draft did not reach the expected state after 100 pump cycles.',
+    );
+  } finally {
+    await tester.runAsync(() async {
+      await subscription?.cancel();
+    });
+  }
+}
+
 Future<_Fixture> _createFixture(
   WidgetTester tester, {
   InspectionTemplate? template,
 }) async {
   final fixture = await tester.runAsync(() async {
-    final database = AppDatabase(NativeDatabase.memory());
+    final directory = await Directory.systemTemp.createTemp(
+      'fieldlens-inspection-widget-',
+    );
+    final database = AppDatabase(
+      NativeDatabase.createInBackground(
+        File(path.join(directory.path, 'fieldlens.sqlite')),
+      ),
+    );
     final workRepository = WorkRepository(database);
     final inspectionRepository = InspectionRepository(database);
+    final files = FileSystemMediaStore(
+      Directory(path.join(directory.path, 'media')),
+    );
+    final mediaRepository = MediaRepository(database, files);
+    final jpeg = image.Image(width: 16, height: 12);
+    image.fill(jpeg, color: image.ColorRgb8(210, 40, 40));
+    final capturedFile = File(path.join(directory.path, 'captured.jpg'));
+    await capturedFile.writeAsBytes(image.encodeJpg(jpeg));
     await workRepository.seedFactoryDemo();
     await inspectionRepository.seedFactoryTemplate();
     if (template != null) {
@@ -362,16 +411,31 @@ Future<_Fixture> _createFixture(
     final workOrder = (await workRepository.watchAssignedWork().first).first;
     final draftId = await inspectionRepository.beginDraft(workOrder.id);
     await inspectionRepository.watchDraft(draftId).first;
+    final container = ProviderContainer(
+      overrides: [
+        appDatabaseProvider.overrideWithValue(database),
+        inspectionRepositoryProvider.overrideWithValue(inspectionRepository),
+        mediaRepositoryProvider.overrideWith((ref) async => mediaRepository),
+      ],
+    );
+    await container
+        .read(inspectionDraftProvider(draftId).future)
+        .timeout(const Duration(seconds: 5));
+    await container
+        .read(mediaRepositoryProvider.future)
+        .timeout(const Duration(seconds: 5));
+    await container
+        .read(inspectionMediaProvider(draftId).future)
+        .timeout(const Duration(seconds: 5));
     return _Fixture(
-      database,
-      inspectionRepository,
-      draftId,
-      ProviderContainer(
-        overrides: [
-          appDatabaseProvider.overrideWithValue(database),
-          inspectionRepositoryProvider.overrideWithValue(inspectionRepository),
-        ],
-      ),
+      directory: directory,
+      database: database,
+      repository: inspectionRepository,
+      media: mediaRepository,
+      files: files,
+      capturedFile: capturedFile,
+      draftId: draftId,
+      container: container,
     );
   });
   return fixture!;
@@ -390,20 +454,40 @@ void _registerCleanup(
       }
       fixture.container.dispose();
       await fixture.database.close();
+      await fixture.directory.delete(recursive: true);
     });
   });
 }
 
-Widget _createApp(_Fixture fixture) => UncontrolledProviderScope(
-  container: fixture.container,
-  child: MaterialApp(home: InspectionScreen(draftId: fixture.draftId)),
-);
+Widget _createApp(_Fixture fixture, {CapturePhotoCallback? capturePhoto}) =>
+    UncontrolledProviderScope(
+      container: fixture.container,
+      child: MaterialApp(
+        home: InspectionScreen(
+          draftId: fixture.draftId,
+          capturePhoto: capturePhoto,
+        ),
+      ),
+    );
 
 class _Fixture {
-  const _Fixture(this.database, this.repository, this.draftId, this.container);
+  const _Fixture({
+    required this.directory,
+    required this.database,
+    required this.repository,
+    required this.media,
+    required this.files,
+    required this.capturedFile,
+    required this.draftId,
+    required this.container,
+  });
 
+  final Directory directory;
   final AppDatabase database;
   final InspectionRepository repository;
+  final MediaRepository media;
+  final FileSystemMediaStore files;
+  final File capturedFile;
   final String draftId;
   final ProviderContainer container;
 }

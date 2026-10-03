@@ -2,56 +2,43 @@
 
 Last reviewed: 2026-10-03
 
-The local mobile foundation and inspection-draft milestone are verified. The complete product remains in development.
+The [milestone checklist](milestones.md) records every phase, acceptance checks and cut-session resume instructions. The latest completed milestone is durable offline photo evidence. The next milestone completes signatures and local submission before cloud integration.
 
 ## Delivered
 
-- Flutter 3.35.7, Riverpod composition, persistent background Drift/SQLite, structured diagnostics, and build-time demo configuration.
-- Two Factory Demo sites, five industrial assets and assignments, reactive work-order lists and local queued-change counts.
-- Schema-driven draft editing, type/required validation, autosave, failed-save retry, and review that is invalidated by subsequent edits.
-- Immutable per-draft template snapshots, stable inspection/answer/operation UUIDs, transactional local writes and full outbox snapshots.
-- Monotonic outbox replay sequences. The v1-to-v2 migration preserves old operations and payloads while adding draft tables and rebuilding outbox ordering safely.
-- Frozen schema snapshots, independent migration/repository review, CI configuration, six ADRs, and reusable cloud setup/start instructions.
+- Flutter 3.35.7/Riverpod application, persistent background Drift/SQLite, structured diagnostics and reusable cloud toolchains.
+- Two local Factory Demo sites, five industrial assets and assignments, reactive work lists and queued-change counts.
+- Schema-driven validated drafts, immutable template snapshots, stable UUID answer records, autosave/retry/review and transactional outbox snapshots.
+- Offline serial search with ambiguity handling; strict local QR resolution and a bundled QR-only camera scanner with manual fallback.
+- App-private original JPEGs, thumbnails, checksums, dimensions and capture metadata outside SQLite. Photo controls show local saving state, previews and unavailable evidence.
+- Durable capture intents, atomic media/answer/outbox completion, partial-write and termination recovery APIs, integrity checks and retryable storage errors. Review checks photo ownership, state, lengths and hashes. Removing an unavailable reference changes the current answer while retaining files and earlier queued snapshots.
+- Additive database v3 migrations preserve existing data, template snapshots and outbox ordering; upgraded databases receive the media index. Demo template revision 2 adds an optional photo item only for new drafts.
+- CI configuration, frozen schemas and foundational ADRs. ADR 0003 documents file/database recovery boundaries.
 
 ## Verification
 
 | Check | Result |
 |---|---|
-| Combined cloud setup, including locked dependencies and Android prerequisites | Passed; repeat run completed |
-| Drift generation and frozen v2 schema comparison | Passed |
-| Formatting | Passed; no changes required |
-| Flutter analysis | Passed; no issues |
-| Entire Flutter test suite | 59 passed |
-| Independent draft/migration review | 9 targeted tests passed; material findings corrected |
-| Android debug APK | Built successfully |
-| Asset identification | 11 repository and 10 widget/platform-fake tests passed |
-| Physical-camera acceptance | Unrun; no device attached, widget tests inject scan values |
-| Hosted GitHub Actions | Configured; not executed remotely |
-| Physical-device force-close/camera/offline-to-server E2E | Unrun; no attached device or emulator, capture/backend/sync are not implemented |
+| Repeatable cloud setup and locked dependencies | Passed |
+| Drift generation and fresh frozen v3 schema comparison | Passed |
+| Formatting and Flutter analysis | Passed; no issues |
+| Entire Flutter test suite | **102 passed** |
+| Independent repository/migration/filesystem review | Accepted after fixes; targeted tests passed |
+| Independent inspection form and photo integration checks | 7 existing widget tests and 7 new integration tests passed |
+| Camera lifecycle/platform-fake suite | 9 passed; native hardware untested |
+| Final Android debug APK | Built successfully |
+| Actual APK permissions and models | No microphone/storage permissions; camera hardware optional; three barcode models bundled |
+| Hosted GitHub Actions | Configured; unrun |
+| Physical-device camera/airplane-mode/force-close checks | Unrun; no attached device or emulator |
+| Full offline-to-server E2E | Unrun; backend/sync transport not implemented |
+| Onboarding publication/new-task restoration | Setup/start draft saved; publication/restoration unverified |
 
-Tests cover local serial ambiguity, malformed/aliased QR rejection, stale-result invalidation, delayed scanner start/stop/disposal, reactive persistence, atomic rollback, reopening file databases, data-preserving migration, sequence non-reuse, schema validation, navigation, queued-change UI, autosave failures, rapid multiple-choice edits, and invalidation of a previously valid review.
+Tests exercise persistence and database reopen, migration preservation/index creation, transactional rollback, UUID ownership, ordered outbox snapshots, capture cancellation and partial writes, recovery after transient filesystem errors, thumbnail repair, legacy-reference retention/removal, same-length evidence corruption, form navigation guards, QR parsing/ambiguity and camera lifecycle races. Widget capture callbacks and camera platform fakes do not establish native-device behavior.
 
-## Roadmap
+## Remaining work
 
-| Phase | State |
-|---|---|
-| 1 — Foundation | Verified for local development and Android packaging |
-| 2 — Offline asset/work-order experience | Demo sites/assets/assignments/list implemented; authenticated scoping awaits Phase 6 |
-| 3 — Inspection engine | Durable validated drafts verified; actual photo/signature capture and final submission remain pending |
-| 4 — Asset identification | Local serial search, strict QR resolution, and camera/manual fallback UI implemented; physical-camera acceptance unrun |
-| 5 — Evidence pipeline | Pending |
-| 6 — Auth/cloud backend/security | Pending |
-| 7 — Synchronization | Durable outbox foundation present; transport, retry, media transfer and pull pending |
-| 8 — Conflicts/reliability | Local ordering and migration safety verified; server revisions and recovery protocol pending |
-| 9 — On-device AI | Pending |
-| 10 — Supervisor console | Pending |
-| 11 — Operations | Pending |
-| 12 — Production/portfolio | Initial CI/tests/architecture present; release signing, security validation and portfolio work pending |
+Signature capture and final local submission are the next prerequisite. The signing contract must require valid local artifacts and final attestation for legacy drafts, preserve immutable templates, and prevent stale signatures after answers change. Submission must validate evidence, freeze editing, complete the work order and queue its final snapshots atomically and idempotently.
 
-## Next milestone and limitations
+Authenticated organization scoping, Supabase/PostgreSQL/Storage/RLS, sync transport/retries/conflicts, ONNX inference, the supervisor console and operational/release features remain unimplemented. Demo assignments are not authenticated production records; no queued operation has synchronized to a server. Reference-aware media cleanup is deferred; retained evidence is not eagerly deleted.
 
-Asset identification searches exact serial values on-device after trimming whitespace and ignoring case. Duplicate matches are all listed in stable site/asset-tag order for technician selection. QR resolution is local and strict: it accepts `FIELDLENS://ASSET/<identifier>`, ignores case in scheme/host, preserves identifier case, and rejects malformed URIs, extra path segments, query/fragment data, ports, user information, and percent-encoded identifiers. Duplicate stored codes after scheme/host normalization produce an explicit ambiguity error instead of selecting an asset. The `mobile_scanner` package uses a bundled on-device ML Kit barcode model. On camera startup failure, the scanner provides manual QR payload entry; serial search is available separately. Widget tests inject values and do not verify the native camera, which remains untested without an attached device.
-
-Proceed to filesystem-backed evidence capture after asset-identification review and appropriate verification. Preserve the template snapshot, transaction, and outbox contracts. Demo assignments are not authenticated production records; no queued operation has synchronized to a server. Photo and signature controls are placeholders, and submission is unavailable. The setup/start configuration remains a draft; publication and restoration in a new task have not been verified.
-
-The cloud machine has no device runtime. Its ADB also cannot create its default home configuration under the current filesystem sandbox; device validation needs supported device access. Debug builds work; production signing is unconfigured. Setup and start instructions are saved as a configuration draft. Publication and restoration in a new task have not been verified.
+The APK is a debug build at `apps/mobile/build/app/outputs/flutter-apk/app-debug.apk`; production signing is unconfigured. This cloud sandbox has no device runtime and prevents ADB from creating its default home configuration. Supported device access is required for hardware acceptance. Environment setup/start instructions are saved as a draft; the product owns publication and restoration.

@@ -4,13 +4,14 @@ Update this checklist when a milestone starts, after verification, and before en
 
 ## Resume checkpoint
 
-- Active milestone: **Phase 5 — durable photo evidence**, integration/review in progress.
-- Branch: `work`; latest verified local commit: `1a3a54e` — Add offline asset identification and QR scanning. Foundation: `1ea83c4`.
-- Uncommitted work: v3 media schema/repository, file store, camera route, media bootstrap/providers, demo template revision 2, tests, Android permissions, CI and docs.
-- Verified aggregate baseline: **59 tests**, formatting, analysis and Android debug APK (Phase 4). New evidence components have targeted checks; integrated Phase 5 checks remain pending.
-- No device/emulator provisioned. Hosted CI, remote publication/new-task restoration and full offline-to-server E2E are unverified. Backend/auth/sync transport are not implemented.
+- Latest completed milestone: **Phase 5 — durable photo evidence**, verified for local development and Android packaging.
+- Next milestone: **Phase 3 completion — signed offline submission**; implementation has not started.
+- Branch: `work`; the evidence milestone commit includes this checkpoint. Confirm the latest commit with `git log -3 --oneline`; earlier checkpoints are `abe3233`, `1a3a54e` and `1ea83c4`.
+- Verified: **102 tests**, frozen dependencies, Drift generation/fresh v3 schema comparison, formatting, analysis, independent review and final Android debug APK.
+- Expected uncommitted work after the milestone commit: none. Always inspect Git status and preserve later user changes.
+- No device/emulator provisioned. Hosted CI, remote publication/new-task restoration and full offline-to-server E2E remain unverified. Backend/auth/sync transport are not implemented.
 
-Read `AGENTS.md`, this checklist, `progress.md`, the project plan and relevant ADRs. Preserve uncommitted changes. Agents and shell sessions may not survive a cut session; inspect files and running processes before resuming or reassigning work.
+Read `AGENTS.md`, this checklist, `progress.md`, the project plan and relevant ADRs. Agents and shell sessions may not survive a cut; inspect files and running processes before resuming or reassigning work.
 
 ```sh
 cd /workspace/FieldLens
@@ -20,7 +21,7 @@ source scripts/cloud-env.sh
 cd apps/mobile
 ```
 
-Next: finish photo controls and unavailable-evidence review checks; review legacy-reference/recovery semantics; verify the Phase 5 checklist; update docs/checkpoint and commit. The media schema workstream currently owns Drift generation. In a resumed session, check for an existing generation process before starting another.
+Next: define the signature artifact, ownership/content binding and submission contract before parallel implementation. Store signature bytes outside SQLite, validate actual artifacts rather than UUID shape, and require final attestation even for existing templates without a signature field. Preserve immutable draft templates. Final submission must validate evidence, freeze edits, complete the work order and queue replayable operations atomically and idempotently. Then delegate migration/repository, file storage and UI against those settled contracts, independently review and verify. No schema generation or build workstream remains active at this checkpoint.
 
 ## 1 — Local foundation
 
@@ -38,8 +39,11 @@ Next: finish photo controls and unavailable-evidence review checks; review legac
 
 - [x] Typed schema-driven fields, validation and immutable template snapshots.
 - [x] Durable draft/answer persistence, autosave/retry/review and host interruption tests.
-- [ ] Photo controls integrated and verified (active Phase 5 dependency).
-- [ ] Signature capture and final local submission.
+- [x] Photo controls integrated and verified in Phase 5.
+- [ ] Signed offline submission milestone: define signature artifact/ownership and finalization contracts.
+- [ ] Additive signature metadata migration and file-backed capture/recovery; reject arbitrary UUIDs.
+- [ ] Signature controls and immutable, idempotent local submission with completed work order and atomic outbox.
+- [ ] Submission rollback/reopen/integrity tests and independent review.
 - [ ] Physical-device force-close/reopen acceptance.
 
 ## 4 — Offline asset identification
@@ -49,20 +53,21 @@ Next: finish photo controls and unavailable-evidence review checks; review legac
 - [x] Independent review, 59-test aggregate, analysis and debug APK.
 - [ ] Physical-device airplane-mode QR acceptance.
 
-## 5 — Evidence pipeline (active)
+## 5 — Evidence pipeline
 
 - [x] Shared filesystem/metadata/capture contracts.
-- [x] JPEG preservation, checksums, thumbnails, limits/path guards and file-store review.
+- [x] JPEG preservation, checksums, thumbnails, limits/path guards and file-store review; 11 real-filesystem tests pass, including oversized-thumbnail repair.
 - [x] Additive v3 media table and capture repository implementation present.
 - [x] Camera route/platform-fake tests and app-private bootstrap/recovery wiring present.
-- [ ] Photo controls, thumbnails, unavailable-evidence feedback and review checks integrated.
-- [ ] Legacy unresolved references preserved honestly; new-reference validation tested.
+- [x] Photo controls, thumbnails, unavailable-evidence feedback/removal and checksum review integrated; original 7 widget tests independently pass.
+- [x] Legacy unresolved references preserved honestly; new-reference ownership and no-op validation tested.
 - [x] Camera lifecycle/error/retry reviewed; 9 platform-fake tests pass.
-- [ ] Independent transaction/recovery/migration review accepted after fixes.
-- [ ] Frozen v3 schema comparison and data-preserving migration tests pass.
-- [ ] Locked dependencies/generation/formatting/analysis/entire suite pass.
-- [ ] Debug APK and camera-only merged permission manifest verified.
-- [ ] ADR/architecture/progress/checklist updated and coherent commit recorded.
+- [x] Independent transaction/recovery/migration review accepted after fixes; partial writes and transient storage errors remain recoverable.
+- [x] Locked dependencies and fresh v3 schema comparison pass.
+- [x] Data-preserving migrations create the media index; missing-index and random-ID test findings corrected. Repository/migration workstream passes 25 focused tests; reviewer independently reran affected cases.
+- [x] Locked dependencies/generation/formatting/analysis/entire suite pass: 102 tests.
+- [x] Debug APK and merged permissions verified: no microphone/storage permissions, optional camera hardware, three bundled barcode models. Final rebuild includes the settled form source.
+- [x] ADR/architecture/progress/checklist updated and included in the coherent evidence milestone commit.
 - [ ] Physical-device capture/restart acceptance.
 
 Run after implementation settles; record actual results before checking verification items:

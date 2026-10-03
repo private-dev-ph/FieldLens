@@ -1,6 +1,6 @@
 # FieldLens architecture
 
-This document records the intended architecture and distinguishes implemented local behavior from later targets. Local foundation and draft behavior are verified; the full product remains in development.
+This document records the intended architecture and distinguishes implemented local behavior from later targets. The local foundation, draft and asset-identification baseline is verified. Phase 5 photo evidence is implemented and verified through host tests and Android packaging, including startup recovery and inspection-screen integration.
 
 ## System boundaries
 
@@ -22,7 +22,7 @@ The mobile app is the technician workflow, the planned console is the supervisor
 
 The mobile app opens Drift/SQLite in the application support directory and seeds two demo sites with the five plan assets and assignments: control cabinet, conveyor motor, PCB/controller, compressor, and network cabinet. This demo data is local and is not scoped by an authenticated user or organization. Assigned work orders are queried reactively and rendered by the Riverpod-backed dashboard. Starting an assigned work order updates local status and inserts a UUID-keyed outbox operation in one SQLite transaction. The dashboard shows locally queued changes. There is no synchronization transport, so operations remain on-device.
 
-Inspection templates are typed, schema-driven records. The Factory Demo template supports the planned field families and validates schema data and answers. Beginning an inspection creates a durable local draft with a JSON snapshot of its template. That snapshot is immutable for the draft's lifetime, so later catalog changes do not rewrite an in-progress inspection. Answers have stable UUID record IDs, and each answer save commits the answer and a replayable draft snapshot outbox operation locally. SQLite schema version 2 adds template, draft, and answer tables and uses a data-preserving Drift table migration to give existing outbox records monotonic local sequences. Operation UUIDs remain unique transport identities; timestamps do not determine replay order. The inspection UI supports editing and reviewing draft validation; it does not submit or finalize an inspection. Photo and signature fields are placeholders; capture and attachment handling are not implemented.
+Inspection templates are typed, schema-driven records. The Factory Demo template supports the planned field families and validates schema data and answers. Beginning an inspection creates a durable local draft with a JSON snapshot of its template. That snapshot is immutable for the draft's lifetime, so later catalog changes do not rewrite an in-progress inspection. Answers have stable UUID record IDs, and each answer save commits the answer and a replayable draft snapshot outbox operation locally. SQLite schema version 2 adds template, draft, and answer tables and uses a data-preserving Drift table migration to give existing outbox records monotonic local sequences. Operation UUIDs remain unique transport identities; timestamps do not determine replay order. The inspection UI supports editing and reviewing draft validation; it does not submit or finalize an inspection. Photo fields now integrate durable capture, thumbnails, previews and unavailable-evidence remediation; signature capture is absent.
 
 ## Local asset identification
 
@@ -32,7 +32,30 @@ QR resolution is local and accepts only a `FIELDLENS://ASSET/<identifier>` URI. 
 
 Repository and widget tests cover matching, ambiguity, strict QR parsing, local resolution, and navigation from an identified asset to assigned work. Physical-camera acceptance has not run because no device is attached; widget tests inject scan results and do not validate native camera behavior.
 
-The recorded pre-asset-identification baseline passed formatting, analysis, all 38 then-existing Flutter tests, frozen schema comparison, and Android debug packaging. Draft persistence and migrations passed independent review. Asset-identification tests were added after that baseline; refreshed aggregate results are pending. Physical-camera and server end-to-end validation remain unrun.
+The committed Phase 4 baseline passed formatting, analysis, all 59 Flutter tests, frozen schema comparison, and Android debug packaging. Draft persistence and migrations passed independent review. The evidence milestone now passes 102 tests, formatting, analysis, fresh v3 schema comparison and Android debug packaging. Physical-camera and server end-to-end validation remain unrun.
+
+## Phase 5 evidence design and implementation status
+
+Phase 5 adds an additive schema v3 with `InspectionMedia` metadata and capture-intent rows. It preserves the immutable template snapshot already stored in each draft. The Factory Demo catalog advances to revision 2 with an optional photo item for newly created drafts; existing drafts retain their earlier revision.
+
+The target photo format is an original JPEG plus a 256-pixel thumbnail, addressed by a client-generated media UUID under app-private filesystem storage. Drift stores both file paths, SHA-256 checksums, dimensions, byte lengths, MIME type, capture time, and state. The code includes `MediaFileStore`, `StoredPhoto`, `FileSystemMediaStore`, `MediaRepository`, and `PhotoCaptureScreen`.
+
+`FileSystemMediaStore` validates JPEG input and size, processes the thumbnail off the UI isolate, writes and flushes temporary files, then renames them to UUID-addressed original and thumbnail paths. It reports hashes and dimensions and can recover a valid original or repair a missing/corrupt thumbnail. `PhotoCaptureScreen` returns a temporary camera file.
+
+`MediaRepository.beginCapture` records a UUID capture intent in Drift. `completeCapture` persists capture time, writes and validates both files, then transactionally marks the media ready and updates the photo answer with its replayable outbox snapshot. `cancelCapture` records a failed intent. `recoverPending` can attach durable originals to interrupted intents, repair thumbnails, and mark unrecoverable or corrupt files failed/missing. `InspectionRepository` requires new photo references to identify ready media from the same draft and field, preserves exact existing unavailable references honestly, rejects known foreign references, and includes actual referenced media metadata in snapshots. Transient filesystem errors preserve capturing/ready state for retry; invalid input or confirmed absent/corrupt files have explicit failed/missing states. Partial writes retain their durable intent for startup recovery.
+
+The transaction boundary is:
+
+```text
+Create capture intent in Drift
+  -> write and flush temp original and thumbnail files
+  -> atomically rename UUID-addressed files into place
+  -> verify file metadata
+  -> SQLite transaction: mark media ready + update photo answer
+     + enqueue replayable inspection snapshot
+```
+
+Application bootstrap prepares app-private media storage and invokes repository recovery before exposing the UI. Riverpod shares that prepared repository. The camera route returns a temporary file for import by the inspection screen. Photo controls create the durable intent before opening the camera, show saving/saved state, and validate ownership, file lengths and checksums during review. Unavailable references can be removed from the current answer without deleting files or earlier queued snapshots. Reference-aware file cleanup is not implemented. Retain files while queued snapshots refer to their media UUID; do not eagerly delete them. Remote storage/auth/upload, inspection submission, and signature capture remain outside this phase. Camera widget tests use a fake platform, and no physical-device acceptance has run.
 
 ## Mobile local-first write and read paths
 
@@ -51,9 +74,9 @@ Repository APIs hide storage and synchronization details. They must not expose a
 
 Records that may originate offline receive stable UUIDs on-device. Server persistence must accept those client-generated identifiers so a later upload does not change local references.
 
-Photo and other binary evidence is intended for the device filesystem. Drift will store references and metadata; image bytes do not belong in SQLite. Media capture, file lifecycle, and upload handling are not implemented.
+Photo and other binary evidence belongs in app-private filesystem storage. Drift stores references and metadata; image bytes do not belong in SQLite. `FileSystemMediaStore` writes UUID-addressed original JPEGs and thumbnails under a supplied root and can recover an original and repair its thumbnail. `MediaRepository` coordinates capture intents, file writes, ready metadata, photo answers, and outbox snapshots. `PhotoCaptureScreen` uses the native camera plugin and returns a temporary captured file. App-private root wiring and startup recovery are implemented; missing-evidence UI and inspection-screen capture integration are implemented. Remote upload is not implemented.
 
-The current inspection form is driven by a versioned schema and validates supported field families: boolean, pass/fail/N/A, single and multiple choice, numeric, text, photo, QR/serial, and signature. Photo and signature controls are placeholders only. A draft stores its template snapshot and answers in Drift so edits survive application process termination. Submission and finalized inspections remain future work.
+The current inspection form is driven by a versioned schema and validates supported field families: boolean, pass/fail/N/A, single and multiple choice, numeric, text, photo, QR/serial, and signature. The bundled Factory Demo template is revision 2 and includes an optional photo field for new drafts; existing drafts keep their prior immutable template snapshots. Photo capture controls are integrated; signature controls remain placeholders. A draft stores its template snapshot and answers in Drift so edits survive application process termination. Submission and finalized inspections remain future work.
 
 ## Synchronization and conflict handling
 
@@ -71,7 +94,7 @@ Supabase Auth identifies users. PostgreSQL Row Level Security and server-side op
 
 ## On-device inference
 
-The initial AI flow runs after image capture: resize and normalize the image, execute the packaged ONNX model, post-process detections, and show results for technician review. Do not make live camera inference a prerequisite. Persist model name/version/hash, inference duration, device context, raw prediction and confidence, and technician verdict separately. Technician confirmation or correction must not overwrite the original prediction. No image capture or inference code exists yet.
+The initial AI flow runs after image capture: resize and normalize the image, execute the packaged ONNX model, post-process detections, and show results for technician review. Do not make live camera inference a prerequisite. Persist model name/version/hash, inference duration, device context, raw prediction and confidence, and technician verdict separately. Technician confirmation or correction must not overwrite the original prediction. There is no inference code or connection from the temporary camera output to an AI flow.
 
 ## Intended implementation sequence
 
@@ -79,4 +102,4 @@ The plan sequences work as follows: (1) local foundation, (2) offline assets and
 
 ## Current implementation state
 
-Implemented locally: Flutter/Riverpod/Drift foundation, demo sites/assets/assignments, reactive work-order list, atomic local work-order/outbox writes, typed inspection schema and validation, data-preserving v1-to-v2 database migration, immutable template snapshots, durable local drafts, UUID answer records/outbox snapshots, exact local serial search, strict local QR resolution, and scan/manual fallback UI. Local foundation and draft behavior are verified. Asset-identification code has repository/widget coverage, while physical-camera acceptance remains unrun. The full product remains in development. Not implemented: authenticated account scoping, evidence/signature capture, inspection submission, backend transport, Supabase Auth/PostgreSQL/Storage/RLS, conflict handling, ONNX inference, supervisor console, and operational/release features. See [progress.md](progress.md).
+Implemented locally: Flutter/Riverpod/Drift foundation, demo sites/assets/assignments, reactive work-order list, atomic local work-order/outbox writes, typed inspection schema and validation, data-preserving v1-to-v2 migration, immutable template snapshots, durable local drafts, UUID answer records/outbox snapshots, exact local serial search, strict local QR resolution, scan/manual fallback UI, UUID-based filesystem media storage, camera capture screen, additive v3 `InspectionMedia` capture-intent rows, and `MediaRepository` operations to record, complete, cancel, and recover captures. Completion commits ready media metadata, its photo answer, and an outbox snapshot together. The Factory Demo template is revision 2 with an optional photo item. App-private startup recovery is wired. Missing-evidence UI and inspection-screen camera integration are present; aggregate verification passes; eager media deletion is disabled pending reference-aware cleanup. No signature capture, inspection submission, remote storage/auth/upload, or synchronization transport exists. Physical-device camera acceptance remains unrun. See [progress.md](progress.md).

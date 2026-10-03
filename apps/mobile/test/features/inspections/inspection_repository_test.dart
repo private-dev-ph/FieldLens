@@ -55,6 +55,80 @@ void main() {
     expect((await _outboxRows(db)).length, outboxCount);
   });
 
+  test('bundled template refresh upgrades only older catalog rows', () async {
+    final bundled = schema.factoryDemoTemplate();
+    final oldTemplate = schema.InspectionTemplate(
+      id: bundled.id,
+      revision: bundled.revision - 1,
+      title: 'Older bundled form',
+      items: bundled.items
+          .where((item) => item.id != 'evidence_photo')
+          .toList(),
+    );
+    await (db.update(
+      db.inspectionTemplates,
+    )..where((row) => row.id.equals(bundled.id))).write(
+      InspectionTemplatesCompanion(
+        revision: Value(oldTemplate.revision),
+        schemaJson: Value(jsonEncode(oldTemplate.toJson())),
+      ),
+    );
+    final oldDraftId = await repository.beginDraft(workOrderId);
+    final pendingCount = (await _outboxRows(db)).length;
+
+    await repository.seedFactoryTemplate();
+
+    final catalog = await (db.select(
+      db.inspectionTemplates,
+    )..where((row) => row.id.equals(bundled.id))).getSingle();
+    final preservedDraft = await repository.watchDraft(oldDraftId).first;
+    expect(catalog.revision, bundled.revision);
+    expect(preservedDraft.template.revision, oldTemplate.revision);
+    expect(
+      preservedDraft.template.items.any((item) => item.id == 'evidence_photo'),
+      isFalse,
+    );
+    expect((await _outboxRows(db)).length, pendingCount);
+
+    final newerCatalog = schema.InspectionTemplate(
+      id: bundled.id,
+      revision: bundled.revision + 1,
+      title: 'Newer server catalog',
+      items: bundled.items,
+    );
+    await (db.update(
+      db.inspectionTemplates,
+    )..where((row) => row.id.equals(bundled.id))).write(
+      InspectionTemplatesCompanion(
+        revision: Value(newerCatalog.revision),
+        schemaJson: Value(jsonEncode(newerCatalog.toJson())),
+      ),
+    );
+    await repository.seedFactoryTemplate();
+    expect(
+      (await (db.select(
+        db.inspectionTemplates,
+      )..where((row) => row.id.equals(bundled.id))).getSingle()).revision,
+      newerCatalog.revision,
+    );
+  });
+
+  test('answers cannot be edited after a draft leaves draft status', () async {
+    final draftId = await repository.beginDraft(workOrderId);
+    final pendingCount = (await _outboxRows(db)).length;
+    await (db.update(db.inspectionDrafts)
+          ..where((row) => row.id.equals(draftId)))
+        .write(const InspectionDraftsCompanion(status: Value('submitted')));
+
+    await expectLater(
+      repository.saveAnswer(draftId, 'safety_check', true),
+      throwsStateError,
+    );
+
+    expect(await db.select(db.inspectionAnswers).get(), isEmpty);
+    expect((await _outboxRows(db)).length, pendingCount);
+  });
+
   test(
     'validates fields, keeps answer IDs stable, and avoids equal JSON writes',
     () async {

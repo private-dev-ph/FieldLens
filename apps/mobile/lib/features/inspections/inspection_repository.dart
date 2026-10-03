@@ -31,16 +31,31 @@ class InspectionRepository {
   /// Installs the bundled schema locally without creating a sync mutation.
   Future<void> seedFactoryTemplate() async {
     final template = schema.factoryDemoTemplate();
-    await db
-        .into(db.inspectionTemplates)
-        .insert(
-          InspectionTemplatesCompanion.insert(
-            id: template.id,
-            revision: template.revision,
-            schemaJson: jsonEncode(template.toJson()),
+    await db.transaction(() async {
+      final existing = await (db.select(
+        db.inspectionTemplates,
+      )..where((row) => row.id.equals(template.id))).getSingleOrNull();
+      if (existing == null) {
+        await db
+            .into(db.inspectionTemplates)
+            .insert(
+              InspectionTemplatesCompanion.insert(
+                id: template.id,
+                revision: template.revision,
+                schemaJson: jsonEncode(template.toJson()),
+              ),
+            );
+      } else if (existing.revision < template.revision) {
+        await (db.update(
+          db.inspectionTemplates,
+        )..where((row) => row.id.equals(template.id))).write(
+          InspectionTemplatesCompanion(
+            revision: Value(template.revision),
+            schemaJson: Value(jsonEncode(template.toJson())),
           ),
-          mode: InsertMode.insertOrIgnore,
         );
+      }
+    });
   }
 
   /// Begins one durable draft for an assigned work order, or returns its
@@ -116,6 +131,7 @@ class InspectionRepository {
         template: template,
         answers: const {},
         answerRecords: const [],
+        mediaRecords: const [],
         status: 'draft',
         updatedAt: now,
       );
@@ -179,6 +195,9 @@ class InspectionRepository {
       if (draft == null) {
         throw StateError('Inspection draft $draftId does not exist');
       }
+      if (draft.status != 'draft') {
+        throw StateError('Inspection draft $draftId is no longer editable');
+      }
 
       final template = _decodeTemplate(draft.templateJson);
       final itemMatches = template.items.where((item) => item.id == itemId);
@@ -194,7 +213,6 @@ class InspectionRepository {
       if (validationError != null) {
         throw ArgumentError.value(value, 'value', validationError);
       }
-
       final oldAnswer =
           await (db.select(db.inspectionAnswers)..where(
                 (answer) =>
@@ -202,6 +220,19 @@ class InspectionRepository {
                     answer.itemId.equals(itemId),
               ))
               .getSingleOrNull();
+      if (item.type == schema.FieldType.photo && value is List) {
+        // Preserve exact v2 photo UUIDs when appending evidence, while
+        // requiring every new reference to have ready local metadata.
+        final legacyIds = oldAnswer == null
+            ? const <String>{}
+            : _photoIds(oldAnswer.valueJson).toSet();
+        await _validatePhotoReferences(
+          draftId,
+          itemId,
+          value.cast<String>(),
+          legacyIds: legacyIds,
+        );
+      }
       if (oldAnswer?.valueJson == encodedValue) return;
 
       if (oldAnswer == null) {
@@ -242,6 +273,11 @@ class InspectionRepository {
             'value': jsonDecode(answer.valueJson),
           },
       ];
+      final mediaRecords = await _mediaRecordsForAnswers(
+        draftId,
+        template,
+        answerRows,
+      );
       await _enqueueSnapshot(
         draftId: draftId,
         workOrderId: draft.workOrderId,
@@ -249,6 +285,7 @@ class InspectionRepository {
         template: template,
         answers: answers,
         answerRecords: answerRecords,
+        mediaRecords: mediaRecords,
         status: draft.status,
         updatedAt: now,
       );
@@ -262,6 +299,7 @@ class InspectionRepository {
     required schema.InspectionTemplate template,
     required Map<String, Object?> answers,
     required List<Map<String, Object?>> answerRecords,
+    required List<Map<String, Object?>> mediaRecords,
     required String status,
     required DateTime updatedAt,
   }) async {
@@ -282,6 +320,7 @@ class InspectionRepository {
                 'template': template.toJson(),
                 'answers': answers,
                 'answerRecords': answerRecords,
+                'mediaRecords': mediaRecords,
                 'status': status,
                 'updatedAt': updatedAt.toIso8601String(),
               },
@@ -319,6 +358,90 @@ class InspectionRepository {
       throw const FormatException('Invalid template snapshot');
     }
     return schema.InspectionTemplate.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<void> _validatePhotoReferences(
+    String draftId,
+    String itemId,
+    List<String> ids, {
+    Set<String> legacyIds = const {},
+  }) async {
+    if (ids.isEmpty) return;
+    final records = await (db.select(
+      db.inspectionMedia,
+    )..where((media) => media.id.isIn(ids))).get();
+    final byId = {for (final media in records) media.id: media};
+    for (final id in ids) {
+      final media = byId[id];
+      if (media == null && legacyIds.contains(id)) continue;
+      if (media == null ||
+          media.inspectionId != draftId ||
+          media.itemId != itemId ||
+          (!legacyIds.contains(id) && media.state != 'ready')) {
+        throw ArgumentError.value(
+          id,
+          'value',
+          'Photo reference must identify ready evidence for this draft field',
+        );
+      }
+    }
+  }
+
+  List<String> _photoIds(String encoded) {
+    final value = jsonDecode(encoded);
+    return value is List ? value.whereType<String>().toList() : const [];
+  }
+
+  Future<List<Map<String, Object?>>> _mediaRecordsForAnswers(
+    String draftId,
+    schema.InspectionTemplate template,
+    List<InspectionAnswer> answerRows,
+  ) async {
+    final photoItemIds = {
+      for (final item in template.items)
+        if (item.type == schema.FieldType.photo) item.id,
+    };
+    final referencedIds = <String>{};
+    for (final answer in answerRows) {
+      if (!photoItemIds.contains(answer.itemId)) continue;
+      final value = jsonDecode(answer.valueJson);
+      if (value is List) {
+        referencedIds.addAll(value.whereType<String>());
+      }
+    }
+    if (referencedIds.isEmpty) return const [];
+
+    final records =
+        await (db.select(db.inspectionMedia)
+              ..where(
+                (media) =>
+                    media.inspectionId.equals(draftId) &
+                    media.id.isIn(referencedIds),
+              )
+              ..orderBy([
+                (media) => OrderingTerm.asc(media.itemId),
+                (media) => OrderingTerm.asc(media.id),
+              ]))
+            .get();
+    return [
+      for (final media in records)
+        {
+          'id': media.id,
+          'inspectionId': media.inspectionId,
+          'itemId': media.itemId,
+          'state': media.state,
+          'originalPath': media.originalPath,
+          'thumbnailPath': media.thumbnailPath,
+          'mimeType': media.mimeType,
+          'byteLength': media.byteLength,
+          'thumbnailByteLength': media.thumbnailByteLength,
+          'sha256': media.sha256,
+          'thumbnailSha256': media.thumbnailSha256,
+          'width': media.width,
+          'height': media.height,
+          'capturedAt': media.capturedAt?.toIso8601String(),
+        },
+    ];
   }
 
   Object? _freezeJson(Object? value) {
