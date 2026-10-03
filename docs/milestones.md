@@ -6,10 +6,11 @@ Update this checklist when a milestone starts, after verification, and before en
 
 - Latest completed milestone: **Phase 5 — durable photo evidence**, verified for local development and Android packaging.
 - Next milestone: **Phase 3 completion — signed offline submission**; implementation has not started.
-- Branch: `work`; the evidence milestone commit includes this checkpoint. Confirm the latest commit with `git log -3 --oneline`; earlier checkpoints are `abe3233`, `1a3a54e` and `1ea83c4`.
+- Local branch: `work`, tracking `origin/main`. Evidence milestone: `f5b5048`; earlier checkpoints: `abe3233`, `1a3a54e` and `1ea83c4`.
+- GitHub: history pushed to `private-dev-ph/FieldLens` on `main`; remote evidence commit verified on 2026-10-03. Confirm later changes with Git status/log.
 - Verified: **102 tests**, frozen dependencies, Drift generation/fresh v3 schema comparison, formatting, analysis, independent review and final Android debug APK.
 - Expected uncommitted work after the milestone commit: none. Always inspect Git status and preserve later user changes.
-- No device/emulator provisioned. Hosted CI, remote publication/new-task restoration and full offline-to-server E2E remain unverified. Backend/auth/sync transport are not implemented.
+- No device/emulator provisioned. Hosted CI, onboarding environment publication/new-task restoration and full offline-to-server E2E remain unverified. Backend/auth/sync transport are not implemented.
 
 Read `AGENTS.md`, this checklist, `progress.md`, the project plan and relevant ADRs. Agents and shell sessions may not survive a cut; inspect files and running processes before resuming or reassigning work.
 

@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-10-03
 
-The [milestone checklist](milestones.md) records every phase, acceptance checks and cut-session resume instructions. The latest completed milestone is durable offline photo evidence. The next milestone completes signatures and local submission before cloud integration.
+The [milestone checklist](milestones.md) records every phase, acceptance checks and cut-session resume instructions. The latest completed milestone is durable offline photo evidence (`f5b5048`), published to GitHub on `main`. The next milestone completes signatures and local submission before cloud integration.
 
 ## Delivered
 
