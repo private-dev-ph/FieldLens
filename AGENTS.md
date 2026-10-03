@@ -1,6 +1,8 @@
 # FieldLens engineering workflow
 
-Read `README.md`, `docs/progress.md`, `docs/fieldlens_end_to_end_plan.md`, relevant ADRs, Git status, and recent history before implementation. Confirm progress against code and tests. Preserve unrelated user changes. Use the existing isolated checkout; create a worktree only when explicitly requested.
+Read `README.md`, `docs/milestones.md`, `docs/progress.md`, `docs/fieldlens_end_to_end_plan.md`, relevant ADRs, Git status, and recent history before implementation. Confirm progress against code and tests. Preserve unrelated user changes. Use the existing isolated checkout; create a worktree only when explicitly requested.
+
+Update `docs/milestones.md` at every milestone and before ending a session. Record the active work, actual verification, blockers, latest coherent commit, and concrete resume steps. Keep `docs/progress.md` concise and consistent with the checklist and code. The lead owns these shared checkpoints; bounded agents report results and remaining checks unless explicitly assigned documentation ownership.
 
 Retain architecture, shared contracts, synchronization semantics, security decisions, integration, and acceptance with the lead orchestrator. Delegate bounded implementation and independent review after interfaces are established. Use GPT-6.1 Sol for orchestration and GPT-6 Luna with High reasoning for bounded tasks when explicit model selection is available; otherwise preserve that reasoning/capability hierarchy. Give agents file ownership, constraints, dependencies, and required verification. Avoid concurrent edits to central files.
 

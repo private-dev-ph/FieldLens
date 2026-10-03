@@ -2,7 +2,7 @@
 
 FieldLens is an offline-first industrial inspection platform under active development. Its goal is to let a technician identify an asset, complete an inspection, collect evidence, optionally run on-device AI, sign and submit while offline, then synchronize the complete record when connectivity returns.
 
-The local mobile foundation, demo assignments, validated inspection drafts, and asset-identification flow are implemented. Serial search and QR resolution use local data, with ambiguous matches shown for technician selection. See the [progress tracker](docs/progress.md) for current verification. Demo assignments are not scoped through an authenticated account. Physical-camera acceptance has not run because no device is attached. Submission, media capture, remote sync transport, cloud backend, and AI are not implemented. See the [end-to-end project plan](docs/fieldlens_end_to_end_plan.md), [architecture overview](docs/architecture.md), and [architecture decisions](docs/adr/).
+The local mobile foundation, demo assignments, validated inspection drafts, and asset-identification flow are implemented. Serial search and QR resolution use local data, with ambiguous matches shown for technician selection. See the [milestone checklist](docs/milestones.md) for current work and resume steps, and the [progress tracker](docs/progress.md) for verification. Demo assignments are not scoped through an authenticated account. Physical-camera acceptance has not run because no device is attached. Submission, media capture, remote sync transport, cloud backend, and AI are not implemented. See the [end-to-end project plan](docs/fieldlens_end_to_end_plan.md), [architecture overview](docs/architecture.md), and [architecture decisions](docs/adr/).
 
 ## Planned components
 
