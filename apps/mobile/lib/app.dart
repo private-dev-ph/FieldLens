@@ -1,5 +1,6 @@
 import 'package:fieldlens_mobile/core/providers.dart';
 import 'package:fieldlens_mobile/core/structured_log.dart';
+import 'package:fieldlens_mobile/features/assets/asset_identification_screen.dart';
 import 'package:fieldlens_mobile/features/work_orders/work_repository.dart';
 import 'package:fieldlens_mobile/features/inspections/inspection_screen.dart';
 import 'package:flutter/material.dart';
@@ -39,7 +40,21 @@ class _WorkDashboardScreenState extends ConsumerState<WorkDashboardScreen> {
     final pendingCount = ref.watch(pendingMutationCountProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('FieldLens'), centerTitle: false),
+      appBar: AppBar(
+        title: const Text('FieldLens'),
+        centerTitle: false,
+        actions: [
+          IconButton(
+            tooltip: 'Identify asset',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => const AssetIdentificationScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

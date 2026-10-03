@@ -2,7 +2,7 @@
 
 FieldLens is an offline-first industrial inspection platform under active development. Its goal is to let a technician identify an asset, complete an inspection, collect evidence, optionally run on-device AI, sign and submit while offline, then synchronize the complete record when connectivity returns.
 
-The local mobile foundation and demo assignment flow are implemented. Phase 3 now includes schema-driven inspection templates, validation, locally persisted drafts, and an inspection screen; its local draft behavior is verified. See the [progress tracker](docs/progress.md) for current evidence. Demo assignments are not scoped through an authenticated account. Submission, media capture, remote sync transport, cloud backend, and AI are not implemented. See the [end-to-end project plan](docs/fieldlens_end_to_end_plan.md), [architecture overview](docs/architecture.md), and [architecture decisions](docs/adr/).
+The local mobile foundation, demo assignments, validated inspection drafts, and asset-identification flow are implemented. Serial search and QR resolution use local data, with ambiguous matches shown for technician selection. See the [progress tracker](docs/progress.md) for current verification. Demo assignments are not scoped through an authenticated account. Physical-camera acceptance has not run because no device is attached. Submission, media capture, remote sync transport, cloud backend, and AI are not implemented. See the [end-to-end project plan](docs/fieldlens_end_to_end_plan.md), [architecture overview](docs/architecture.md), and [architecture decisions](docs/adr/).
 
 ## Planned components
 
@@ -40,7 +40,7 @@ flutter test
 
 The local demo seeds two sites and five assets/work orders without authentication or account scoping. The work-order list observes local state; starting work writes the updated status and outbox operation atomically. A technician can begin and edit a durable inspection draft using a versioned template snapshot. Answers are validated and saved locally as they change.
 
-Formatting and analysis pass, all 38 tests pass, and `flutter build apk --debug` produces an Android debug APK. Migration and draft persistence also passed independent review. Hosted CI and physical-device end-to-end checks have not run. See the [progress tracker](docs/progress.md) for precise scope and limitations.
+Formatting and analysis passed, all 59 Flutter tests passed, and `flutter build apk --debug` produced an Android debug APK with the barcode model bundled inside it. Migration, draft persistence, and asset identification received independent review. Physical-camera acceptance remains unrun. Hosted CI and physical-device end-to-end checks have not run. See the [progress tracker](docs/progress.md) for precise scope and limitations.
 
 The setup script installs verified Flutter/JDK/Android toolchains, configures the supplied environment CA and Gradle proxy without disabling TLS, and can be rerun. Run `source scripts/cloud-env.sh` in each new shell. Production release signing is unconfigured.
 
@@ -56,4 +56,4 @@ The setup script installs verified Flutter/JDK/Android toolchains, configures th
 
 ## Current status
 
-Local demo assignments and durable inspection drafts are verified. The next milestone is offline asset identification and filesystem-backed evidence. Submission, evidence capture, remote authentication/backend, synchronization transport, AI, and later roadmap phases remain unimplemented. The [progress tracker](docs/progress.md) records phase status and the next acceptance target.
+Local demo assignments and durable inspection drafts are verified. Asset serial search and QR identification are implemented against local data; physical-camera acceptance is unrun. Filesystem-backed evidence capture is the next milestone. Photo/signature controls remain placeholders. Submission, remote authentication/backend, synchronization transport, AI, and later roadmap phases remain unimplemented. The [progress tracker](docs/progress.md) records phase status and the next acceptance target.

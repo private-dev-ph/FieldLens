@@ -1,4 +1,5 @@
 **/.dart_tool/
+**/.kotlin/
 **/build/
 **/.flutter-plugins-dependencies
 **/coverage/
