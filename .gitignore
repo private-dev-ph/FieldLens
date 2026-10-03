@@ -1,0 +1,16 @@
+**/.dart_tool/
+**/build/
+**/.flutter-plugins-dependencies
+**/coverage/
+**/*.iml
+**/.idea/
+**/local.properties
+**/key.properties
+**/*.jks
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+apps/mobile/lib/database/app_database.g.dart
